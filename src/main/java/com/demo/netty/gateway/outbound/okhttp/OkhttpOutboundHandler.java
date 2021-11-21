@@ -1,12 +1,8 @@
 package com.demo.netty.gateway.outbound.okhttp;
 
-import com.demo.netty.gateway.filter.HeaderResponseFilter;
 import com.demo.netty.gateway.filter.HttpRequestFilter;
-import com.demo.netty.gateway.filter.HttpResponseFilter;
 import com.demo.netty.gateway.outbound.OutboundHandler;
 import com.demo.netty.gateway.outbound.factory.NamedThreadFactory;
-import com.demo.netty.gateway.router.HttpEndpointRouter;
-import com.demo.netty.gateway.router.RoundRibbonHttpEndpointRouter;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
@@ -16,17 +12,15 @@ import okhttp3.*;
 import java.io.IOException;
 import java.util.List;
 import java.util.concurrent.*;
-import java.util.stream.Collectors;
 
+/**
+ * 通过 OkHttp 访问后端服务
+ */
 public class OkhttpOutboundHandler extends OutboundHandler {
 
     final OkHttpClient okHttpClient;
     final private ExecutorService proxyService;
     final private List<String> backendUrls;
-
-    HttpResponseFilter filter = new HeaderResponseFilter();
-//    HttpEndpointRouter router = new RandomHttpEndpointRouter();
-    HttpEndpointRouter router = new RoundRibbonHttpEndpointRouter();
 
     public OkhttpOutboundHandler(List<String> backends) {
 
@@ -90,8 +84,6 @@ public class OkhttpOutboundHandler extends OutboundHandler {
             response.headers().set("Content-Length", endpointResponse.body().contentLength());
             System.out.println(endpointResponse.body().contentLength());
             filter.filter(response);
-            System.out.println("========================= OkHttp headers ===================================");
-            System.out.println(endpointResponse.headers());
         } catch (IOException e) {
             e.printStackTrace();
             response = new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.NO_CONTENT);

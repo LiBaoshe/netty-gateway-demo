@@ -1,33 +1,29 @@
-package com.demo.netty.gateway.outbound.httpclient4;
+package com.demo.netty.gateway.outbound.netty4;
 
 import com.demo.netty.gateway.filter.HttpRequestFilter;
 import com.demo.netty.gateway.outbound.OutboundHandler;
 import com.demo.netty.gateway.outbound.factory.NamedThreadFactory;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.handler.codec.http.*;
-import org.apache.http.HttpResponse;
-import org.apache.http.client.methods.HttpGet;
-import org.apache.http.concurrent.FutureCallback;
-import org.apache.http.impl.nio.client.CloseableHttpAsyncClient;
-import org.apache.http.impl.nio.client.HttpAsyncClients;
-import org.apache.http.impl.nio.reactor.IOReactorConfig;
-import org.apache.http.protocol.HTTP;
-import org.apache.http.util.EntityUtils;
 
 import java.util.List;
 import java.util.concurrent.*;
 
-public class HttpOutboundHandler extends OutboundHandler {
+/**
+ * 通过 Netty 访问后端服务
+ */
+public class NettyOutboundHandler extends OutboundHandler {
 
-    final private CloseableHttpAsyncClient httpclient;
     final private ExecutorService proxyService;
     final private List<String> backendUrls;
+    final private NettyHttpClient nettyHttpClient;
 
-    public HttpOutboundHandler(List<String> backends) {
+    public NettyOutboundHandler(List<String> backends) {
+        this.backendUrls = backends;
 
-        this.backendUrls = super.getBackendUrls(backends);
         int cores = Runtime.getRuntime().availableProcessors();
         long keepAliveTime = 1000;
         int queueSize = 2048;
@@ -41,20 +37,7 @@ public class HttpOutboundHandler extends OutboundHandler {
                 new NamedThreadFactory("proxyService"),
                 handler);
 
-        IOReactorConfig ioConfig = IOReactorConfig.custom()
-                .setConnectTimeout(1000)
-                .setSoTimeout(1000)
-                .setIoThreadCount(cores)
-                .setRcvBufSize(32 * 1024)
-                .build();
-
-        httpclient = HttpAsyncClients.custom().setMaxConnTotal(40)
-                .setMaxConnPerRoute(8)
-                .setDefaultIOReactorConfig(ioConfig)
-                .setKeepAliveStrategy((response, context) -> 6000)
-                .build();
-
-        httpclient.start();
+        nettyHttpClient = new NettyHttpClient();
     }
 
     @Override
@@ -65,40 +48,45 @@ public class HttpOutboundHandler extends OutboundHandler {
         proxyService.submit(() -> fetchGet(fullRequest, ctx, url));
     }
 
+    private ByteBufToBytes reader;
+
     private void fetchGet(FullHttpRequest inbound, ChannelHandlerContext ctx, final String url) {
-        final HttpGet httpGet = new HttpGet(url);
-        httpGet.setHeader(HTTP.CONN_DIRECTIVE, HTTP.CONN_KEEP_ALIVE);
-        httpGet.setHeader("mao",  "mao");
-
-        httpclient.execute(httpGet, new FutureCallback<HttpResponse>() {
-            @Override
-            public void completed(HttpResponse endpointResponse) {
-                handleResponse(inbound, ctx, endpointResponse);
-            }
-
-            @Override
-            public void failed(Exception e) {
-                httpGet.abort();
-                e.printStackTrace();
-            }
-
-            @Override
-            public void cancelled() {
-                httpGet.abort();
-            }
-        });
+        try {
+            // 发送 Netty 请求
+            nettyHttpClient.connect(url, (nettyCtx, msg) -> {
+                if (msg instanceof HttpResponse) {
+                    HttpResponse response = (HttpResponse) msg;
+                    System.out.println("CONTENT_TYPE:" + response.headers().get(HttpHeaderNames.CONTENT_TYPE));
+                    if (HttpUtil.isContentLengthSet(response)) {
+                        reader = new ByteBufToBytes(
+                                (int) HttpUtil.getContentLength(response));
+                    }
+                }
+                if (msg instanceof HttpContent) {
+                    HttpContent httpContent = (HttpContent) msg;
+                    ByteBuf content = httpContent.content();
+                    reader.reading(content);
+                    content.release();
+                    if (reader.isEnd()) {
+                        handleResponse(inbound, ctx, reader.readFull(), reader.contentLength);
+                    }
+                }
+                nettyCtx.close();
+            });
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
-    private void handleResponse(FullHttpRequest fullRequest, ChannelHandlerContext ctx, HttpResponse endpointResponse) {
+    private void handleResponse(FullHttpRequest fullRequest, ChannelHandlerContext ctx, byte[] body, int contentLength) {
         FullHttpResponse response = null;
         try {
-            byte[] body = EntityUtils.toByteArray(endpointResponse.getEntity());
             response = new DefaultFullHttpResponse(
                     HttpVersion.HTTP_1_1,
                     HttpResponseStatus.OK,
                     Unpooled.wrappedBuffer(body));
             response.headers().set("Content-Type", "application/json");
-            response.headers().setInt("Content-Length", Integer.parseInt(endpointResponse.getFirstHeader("Content-Length").getValue()));
+            response.headers().setInt("Content-Length", contentLength);
             filter.filter(response);
         } catch (Exception e){
             e.printStackTrace();

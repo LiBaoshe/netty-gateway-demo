@@ -4,6 +4,7 @@ import com.demo.netty.gateway.filter.HeaderHttpRequestFilter;
 import com.demo.netty.gateway.filter.HttpRequestFilter;
 import com.demo.netty.gateway.outbound.OutboundHandler;
 import com.demo.netty.gateway.outbound.httpclient4.HttpOutboundHandler;
+import com.demo.netty.gateway.outbound.netty4.NettyOutboundHandler;
 import com.demo.netty.gateway.outbound.okhttp.OkhttpOutboundHandler;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
@@ -24,7 +25,8 @@ public class HttpInboundHandler extends ChannelInboundHandlerAdapter {
     public HttpInboundHandler(List<String> proxyServers) {
         this.proxyServers = proxyServers;
 //        this.handler = new HttpOutboundHandler(this.proxyServers);
-        this.handler = new OkhttpOutboundHandler(this.proxyServers);
+//        this.handler = new OkhttpOutboundHandler(this.proxyServers);
+        this.handler = new NettyOutboundHandler(this.proxyServers);
     }
 
     @Override

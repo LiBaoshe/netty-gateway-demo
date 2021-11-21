@@ -1,5 +1,5 @@
 server:
-  port: 9999
+  port: 9999 # 网关端口，如果不配做，默认是 8888
 
 netty:
   gateway:
